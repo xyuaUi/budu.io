@@ -95,24 +95,31 @@ canvas{display:block;}
 // BUDU.IO 3D 
 // ═══════════════════════════════════════════════════
 
-// ── Load Slime.glb ──
-let slimeModel = new THREE.Group();
+// ── Load Models ──
+let charModel = new THREE.Group();
+let modelsLoaded = 0;
 
-// Ubah tombol mulai jadi loading sementara slime di-download
 const btnStart = document.getElementById('btn-start');
 btnStart.style.pointerEvents = 'none';
-btnStart.textContent = 'LOADING MODEL...';
+btnStart.textContent = 'LOADING MODELS...';
+
+function checkStart() {
+  modelsLoaded++;
+  if(modelsLoaded >= 2) {
+    btnStart.style.pointerEvents = 'all';
+    btnStart.textContent = 'MULAI';
+  }
+}
 
 const loader = new THREE.GLTFLoader();
-loader.load('Slime.glb', function(gltf) {
-  slimeModel = gltf.scene;
-  btnStart.style.pointerEvents = 'all';
-  btnStart.textContent = 'MULAI';
+// Load Model Karakter (1.glb)
+loader.load('1.glb', function(gltf) {
+  charModel = gltf.scene;
+  checkStart();
 }, undefined, function(err) {
   console.error(err);
-  btnStart.textContent = 'GAGAL MEMUAT MODEL';
+  btnStart.textContent = 'GAGAL MEMUAT KARAKTER';
 });
-
 
 // ── Renderer ──
 const renderer = new THREE.WebGLRenderer({antialias:true});
@@ -165,25 +172,48 @@ const gMat=new CANNON.Material('g'),pMat=new CANNON.Material('p');
 phys.addContactMaterial(new CANNON.ContactMaterial(gMat,pMat,{friction:.4,restitution:.05}));
 phys.addContactMaterial(new CANNON.ContactMaterial(pMat,pMat,{friction:.2,restitution:.28}));
 
-// ── Platforms ──
-const platList=[];
-function mkPlat(x,y,z,w,h,d,col=0xd4b878){
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color:col}));
-  mesh.position.set(x,y,z);mesh.receiveShadow=mesh.castShadow=true;scene.add(mesh);
-  const top=new THREE.Mesh(new THREE.BoxGeometry(w-.08,.07,d-.08),new THREE.MeshLambertMaterial({color:0xffffff,transparent:true,opacity:.15}));
-  top.position.set(x,y+h/2+.035,z);scene.add(top);
-  const body=new CANNON.Body({mass:0,material:gMat});
-  body.addShape(new CANNON.Box(new CANNON.Vec3(w/2,h/2,d/2)));
-  body.position.set(x,y,z);body.isPlatform=true;phys.addBody(body);
-  platList.push({mesh,body,baseY:y});
-}
-mkPlat(0,0,0,14,.8,14,0xd4b878);
-mkPlat(-9,2,0,5,.6,5,0xc89050);mkPlat(9,2,0,5,.6,5,0xc89050);
-mkPlat(0,2,-9,5,.6,5,0xc89050);mkPlat(0,2,9,5,.6,5,0xc89050);
-mkPlat(-6,4.5,-6,3.5,.5,3.5,0xb07840);mkPlat(6,4.5,-6,3.5,.5,3.5,0xb07840);
-mkPlat(-6,4.5,6,3.5,.5,3.5,0xb07840);mkPlat(6,4.5,6,3.5,.5,3.5,0xb07840);
-mkPlat(0,7,0,4,.5,4,0xa06030);
-[[-11,-2,-11],[11,-2,-11],[-11,-2,11],[11,-2,11]].forEach(([x,y,z])=>mkPlat(x,y,z,1.2,3.5,1.2,0x886050));
+// ── Map & Platforms (Parking.glb) ──
+const platList=[]; // Array dikosongkan agar update animasi platfom lama tidak error
+
+// Load Map / Tanah
+loader.load('Parking.glb', function(gltf) {
+  const mapScene = gltf.scene;
+  scene.add(mapScene);
+
+  // Buat physics otomatis untuk setiap bangunan/tanah di map
+  mapScene.traverse(child => {
+    if (child.isMesh) {
+      child.receiveShadow = true;
+      child.castShadow = true;
+      
+      // Ambil ukuran & posisi persis objek di dunia
+      const box = new THREE.Box3().setFromObject(child);
+      if (!box.isEmpty()) {
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        
+        // Berikan batas minimum ketebalan (0.05) agar physics tanah tidak tertembus
+        const hx = Math.max(size.x / 2, 0.05);
+        const hy = Math.max(size.y / 2, 0.05);
+        const hz = Math.max(size.z / 2, 0.05);
+        
+        const shape = new CANNON.Box(new CANNON.Vec3(hx, hy, hz));
+        const body = new CANNON.Body({ mass: 0, material: gMat });
+        body.addShape(shape);
+        body.position.set(center.x, center.y, center.z);
+        body.isPlatform = true;
+        phys.addBody(body);
+      }
+    }
+  });
+  checkStart();
+}, undefined, function(err) {
+  console.error(err);
+  btnStart.textContent = 'GAGAL MEMUAT MAP';
+});
+
 
 // ── Utils ──
 function hpHex(p){return p>.6?0x4caf50:p>.3?0xff9800:0xf44336;}
@@ -275,10 +305,10 @@ class Player{
 
     this.group=new THREE.Group();
 
-    // Clone model slime untuk tiap karakter
-    const mesh = slimeModel.clone();
+    // Clone model untuk tiap karakter menggunakan 1.glb
+    const mesh = charModel.clone();
     
-    // Warnai slime sesuai warna asli player/bot dan aktifkan bayangan
+    // Warnai model sesuai warna asli player/bot dan aktifkan bayangan
     mesh.traverse((child) => {
       if (child.isMesh) {
         child.material = new THREE.MeshLambertMaterial({color: this.color});
