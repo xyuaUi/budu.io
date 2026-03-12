@@ -1,13 +1,6 @@
 {
   "short_name": "BuduGO",
   "name": "Budu.io - Physics Party",
-  "icons": [
-    {
-      "src": "/assets/icon.png",
-      "type": "image/png",
-      "sizes": "192x192"
-    }
-  ],
   "start_url": "/budu.io/index.html",
   "background_color": "#87CEEB",
   "display": "standalone",
