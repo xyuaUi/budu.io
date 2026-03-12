@@ -191,15 +191,12 @@ loader.load('Parking.glb', function(gltf) {
         const hx = Math.max(size.x / 2, 0.05);
         const hz = Math.max(size.z / 2, 0.05);
         
-        // FIX MELAYANG: Kita atur agar titik ATAS lantai fisika sejajar presisi dengan visual
-        // hy diatur minimal 1.0 (tebal 2 meter) agar kokoh dan tidak tembus
         const hy = Math.max(size.y / 2, 1.0); 
         
         const shape = new CANNON.Box(new CANNON.Vec3(hx, hy, hz));
         const body = new CANNON.Body({ mass: 0, material: gMat });
         body.addShape(shape);
         
-        // Atur posisi fisika agar atapnya pas di box.max.y (permukaan aspal visual)
         const physCenterY = box.max.y - hy;
         
         body.position.set(center.x, physCenterY, center.z);
@@ -423,7 +420,6 @@ class Player{
         const b = platBoxes[Math.floor(Math.random() * platBoxes.length)];
         sx = b.min.x + Math.random()*(b.max.x - b.min.x);
         sz = b.min.z + Math.random()*(b.max.z - b.min.z);
-        // Jika inisial awal, jatuh dari y=30. Jika respawn biasa, langsung muncul di atas tanah
         sy = initial ? 30 : b.max.y + 0.5; 
     } else {
         sx = (Math.random()-.5)*10;
@@ -453,7 +449,6 @@ class Player{
     hudUpdate();
   }
   
-  // FIX LOMPATAN: Kurangi kekuatan lompat agar tidak melayang terlalu tinggi
   jump(){if(this.jumpCount>=1)return;this.body.velocity.y=6.5;this.jumpCount++;this.onGround=false;}
   
   punch(all){
@@ -489,15 +484,21 @@ class Player{
     if(!this.isBot||!this.alive||this.stunT>0 || !gameReady)return;
     this.botT--;this.botJumpT--;
     const alive=all.filter(p=>p!==this&&p.alive);if(!alive.length)return;
-    if(this.botT<=0){this.botTarget=alive[Math.random()*alive.length|0];this.botT=35+Math.random()*65|0;}
+    
+    // Bot AI Ditenangkan agar tidak terlalu rusuh ganti target
+    if(this.botT<=0){this.botTarget=alive[Math.random()*alive.length|0];this.botT=80+Math.random()*120|0;}
     const tgt=this.botTarget||alive[0];if(!tgt.alive){this.botTarget=null;return;}
     const dx=tgt.px-this.px,dz=tgt.pz-this.pz,d2=Math.sqrt(dx*dx+dz*dz);
     this.facing=Math.atan2(dx,dz);
-    if(d2>1.5){const s=14;this.body.velocity.x=dx/d2*s;this.body.velocity.z=dz/d2*s;}
-    if(this.onGround&&this.botJumpT<=0&&(tgt.py>this.py+1.5||Math.random()<.012)){this.jump();this.botJumpT=55;}
+    
+    // Kecepatan Bot Disesuaikan ke 8
+    if(d2>1.5){const s=8;this.body.velocity.x=dx/d2*s;this.body.velocity.z=dz/d2*s;}
+    
+    // Probabilitas Rusuh Diturunkan Drastis
+    if(this.onGround&&this.botJumpT<=0&&(tgt.py>this.py+1.5||Math.random()<.005)){this.jump();this.botJumpT=80;}
     const fd=Math.sqrt(dx*dx+(tgt.py-this.py)**2+dz*dz);
-    if(fd<2.5){if(this.punchCD<=0&&Math.random()<.07)this.punch(all);if(this.grabCD<=0&&Math.random()<.03)this.grab(all);}
-    if(fd<5.5&&this.specCD<=0&&Math.random()<.005)this.special(all);
+    if(fd<2.5){if(this.punchCD<=0&&Math.random()<.02)this.punch(all);if(this.grabCD<=0&&Math.random()<.01)this.grab(all);}
+    if(fd<5.5&&this.specCD<=0&&Math.random()<.001)this.special(all);
   }
   update(all, dt){
     if(!this.alive)return;
@@ -507,8 +508,6 @@ class Player{
     
     this.group.position.set(this.px, this.py - this.bodyRadius, this.pz); 
     this.group.rotation.y=this.facing;
-    
-    // FIX KEDIP: Karakter sekarang solid tidak berkedip meskipun invT (kebal pukulan spawn) masih ada
     this.group.visible = this.alive;
     
     const hs=Math.sqrt(this.body.velocity.x**2+this.body.velocity.z**2);
@@ -519,7 +518,7 @@ class Player{
         } else if (!this.onGround) {
             this.playAnim(this.animJump, 1);
         } else if (hs > 0.6) {
-            this.playAnim(this.animWalk, 2.0); 
+            this.playAnim(this.animWalk, 1.2); 
         } else {
             this.playAnim(this.animIdle, 1);
         }
@@ -539,7 +538,7 @@ class Player{
     this.hpFg.quaternion.copy(camera.quaternion);
     const shd_sc=Math.max(.05,1-Math.max(0,this.py)*.07);this.shdMesh.scale.set(shd_sc,shd_sc,shd_sc);
     
-    if(hs>18){this.body.velocity.x=this.body.velocity.x/hs*18;this.body.velocity.z=this.body.velocity.z/hs*18;}
+    if(hs>12){this.body.velocity.x=this.body.velocity.x/hs*12;this.body.velocity.z=this.body.velocity.z/hs*12;}
     if(this.py < lowestY) this.takeDmg(this.hp, 0, 0, 0, null);
   }
 }
@@ -565,9 +564,9 @@ jZone.addEventListener('touchend',  e=>{e.preventDefault();jA=false;jDX=0;jDZ=0;
 
 const camZ=document.getElementById('cam-zone');
 let camDrag=false,camLX=0,camLY=0,camH=0;
-let camV = 0.15; 
-let camDist = 5.5; 
-function onCamD(dx,dy){camH-=dx*.008;camV=Math.max(.10,Math.min(1.1,camV-dy*.005));}
+let camV = 0.10; 
+let camDist = 1.8; // KAMERA 3 KALI LIPAT LEBIH DEKAT
+function onCamD(dx,dy){camH-=dx*.008;camV=Math.max(.05,Math.min(1.1,camV-dy*.005));}
 
 camZ.addEventListener('touchstart',e=>{e.preventDefault();camDrag=true;camLX=e.touches[0].clientX;camLY=e.touches[0].clientY;},{passive:false});
 camZ.addEventListener('touchmove', e=>{e.preventDefault();if(!camDrag)return;onCamD(e.touches[0].clientX-camLX,e.touches[0].clientY-camLY);camLX=e.touches[0].clientX;camLY=e.touches[0].clientY;},{passive:false});
@@ -576,7 +575,7 @@ window.addEventListener('mousedown',e=>{if(e.button===2||e.button===0){camDrag=t
 window.addEventListener('mousemove',e=>{if(camDrag){onCamD(e.clientX-camLX,e.clientY-camLY);camLX=e.clientX;camLY=e.clientY;}});
 window.addEventListener('mouseup',  e=>{camDrag=false;});
 window.addEventListener('contextmenu',e=>e.preventDefault());
-window.addEventListener('wheel',e=>{camDist=Math.max(3,Math.min(20,camDist+e.deltaY*.022));});
+window.addEventListener('wheel',e=>{camDist=Math.max(1,Math.min(20,camDist+e.deltaY*.022));});
 
 function bindBtn(id,code){
   const el=document.getElementById(id);if(!el)return;
@@ -625,7 +624,7 @@ function initGame(){
   
   players=[0,1,2,3].map(i=>{
       const p = new Player(i,i!==0);
-      p.respawn(true); // Parameter true menandakan spawn pertama kali (dari langit)
+      p.respawn(true);
       return p;
   });
   
@@ -649,7 +648,8 @@ function initGame(){
 
 function updateCam(){
   const p0=players[0];
-  const focus=p0&&p0.alive?p0.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)):new THREE.Vector3(0,2,0);
+  // Target Fokus diturunkan ke 0.8 agar kamera sangat dekat tidak tembus kepala
+  const focus=p0&&p0.alive?p0.group.position.clone().add(new THREE.Vector3(0, 0.8, 0)):new THREE.Vector3(0,1,0);
   camTgt.lerp(focus,.2);
 
   if(p0 && p0.alive && gameReady) {
@@ -692,7 +692,8 @@ function loop(t){
       if(jA){mx+=rgt.x*jDX+fwd.x*(-jDZ);mz+=rgt.z*jDX+fwd.z*(-jDZ);}
       const ml=Math.sqrt(mx*mx+mz*mz);
       
-      if(ml>.01){mx/=ml;mz/=ml;p0.body.velocity.x=mx*16;p0.body.velocity.z=mz*16;p0.facing=Math.atan2(mx,mz);}
+      // Kecepatan pemain diturunkan ke 10 agar normal dan mudah dikendalikan
+      if(ml>.01){mx/=ml;mz/=ml;p0.body.velocity.x=mx*10;p0.body.velocity.z=mz*10;p0.facing=Math.atan2(mx,mz);}
       
       if((keys['KeyZ']||keys['Space'])&&!keys['_jh']){p0.jump();keys['_jh']=true;}
       if(!keys['KeyZ']&&!keys['Space'])keys['_jh']=false;
