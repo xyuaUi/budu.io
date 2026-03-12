@@ -90,6 +90,8 @@ canvas{display:block;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
+
 <script>
 // ═══════════════════════════════════════════════════
 // BUDU.IO 3D 
@@ -97,6 +99,7 @@ canvas{display:block;}
 
 // ── Load Models ──
 let charModel = new THREE.Group();
+let charAnimations = [];
 let modelsLoaded = 0;
 
 const btnStart = document.getElementById('btn-start');
@@ -112,14 +115,83 @@ function checkStart() {
 }
 
 const loader = new THREE.GLTFLoader();
+
 // Load Model Karakter (1.glb)
 loader.load('1.glb', function(gltf) {
   charModel = gltf.scene;
+  charAnimations = gltf.animations; // Simpan animasi bawaan glb
+  
+  // Mengaktifkan bayangan tapi TIDAK merubah warna asli tekstur
+  charModel.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
   checkStart();
 }, undefined, function(err) {
   console.error(err);
   btnStart.textContent = 'GAGAL MEMUAT KARAKTER';
 });
+
+// ── Physics & Scene ──
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x0d1020,0.015);
+scene.background=new THREE.Color(0x0d1020);
+
+const phys=new CANNON.World();
+phys.gravity.set(0,-26,0);
+phys.broadphase=new CANNON.NaiveBroadphase();
+phys.solver.iterations=10;
+const gMat=new CANNON.Material('g'),pMat=new CANNON.Material('p');
+phys.addContactMaterial(new CANNON.ContactMaterial(gMat,pMat,{friction:.4,restitution:.05}));
+phys.addContactMaterial(new CANNON.ContactMaterial(pMat,pMat,{friction:.2,restitution:.28}));
+
+// ── Map & Platforms (Parking.glb) ──
+let platBoxes = []; // Simpan koordinat tanah untuk respawn random
+let lowestY = -15;  // Batas bawah untuk jatuh & mati
+
+loader.load('Parking.glb', function(gltf) {
+  const mapScene = gltf.scene;
+  
+  // PERBESAR MAP 4X LIPAT
+  mapScene.scale.set(4, 4, 4); 
+  scene.add(mapScene);
+
+  mapScene.traverse(child => {
+    if (child.isMesh) {
+      child.receiveShadow = true;
+      child.castShadow = true;
+      
+      const box = new THREE.Box3().setFromObject(child);
+      if (!box.isEmpty()) {
+        const size = new THREE.Vector3(); box.getSize(size);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        
+        const hx = Math.max(size.x / 2, 0.05);
+        const hy = Math.max(size.y / 2, 0.05);
+        const hz = Math.max(size.z / 2, 0.05);
+        
+        const shape = new CANNON.Box(new CANNON.Vec3(hx, hy, hz));
+        const body = new CANNON.Body({ mass: 0, material: gMat });
+        body.addShape(shape);
+        body.position.set(center.x, center.y, center.z);
+        body.isPlatform = true;
+        phys.addBody(body);
+
+        // Simpan kotak ini untuk titik respawn
+        platBoxes.push({min: box.min, max: box.max});
+        // Hitung batas titik terbawah map
+        if(box.min.y < lowestY) lowestY = box.min.y - 15;
+      }
+    }
+  });
+  checkStart();
+}, undefined, function(err) {
+  console.error(err);
+  btnStart.textContent = 'GAGAL MEMUAT MAP';
+});
+
 
 // ── Renderer ──
 const renderer = new THREE.WebGLRenderer({antialias:true});
@@ -136,84 +208,28 @@ window.addEventListener('resize',()=>{
   renderer.setSize(innerWidth,innerHeight);
 });
 
-const scene=new THREE.Scene();
-scene.fog=new THREE.FogExp2(0x0d1020,0.015);
-scene.background=new THREE.Color(0x0d1020);
 const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,200);
 camera.position.set(0,18,26);
 
-// ── Lights ──
+// ── Lights & Stars ──
 scene.add(new THREE.AmbientLight(0x667799,1.6));
 const sun=new THREE.DirectionalLight(0xfff0dd,2.4);
 sun.position.set(12,24,10);sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
-sun.shadow.camera.left=sun.shadow.camera.bottom=-35;
-sun.shadow.camera.right=sun.shadow.camera.top=35;
-sun.shadow.camera.far=90;
+sun.shadow.camera.left=sun.shadow.camera.bottom=-45;
+sun.shadow.camera.right=sun.shadow.camera.top=45;
+sun.shadow.camera.far=120;
 scene.add(sun);
 const rim=new THREE.DirectionalLight(0x3355ff,0.45);
 rim.position.set(-8,5,-12);scene.add(rim);
 
-// ── Stars ──
 (()=>{
   const pos=[];
-  for(let i=0;i<800;i++) pos.push((Math.random()-.5)*320,Math.random()*140+6,(Math.random()-.5)*320);
+  for(let i=0;i<800;i++) pos.push((Math.random()-.5)*420,Math.random()*140+6,(Math.random()-.5)*420);
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   scene.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0xffffff,size:.22,transparent:true,opacity:.75})));
 })();
-
-// ── Physics ──
-const phys=new CANNON.World();
-phys.gravity.set(0,-26,0);
-phys.broadphase=new CANNON.NaiveBroadphase();
-phys.solver.iterations=10;
-const gMat=new CANNON.Material('g'),pMat=new CANNON.Material('p');
-phys.addContactMaterial(new CANNON.ContactMaterial(gMat,pMat,{friction:.4,restitution:.05}));
-phys.addContactMaterial(new CANNON.ContactMaterial(pMat,pMat,{friction:.2,restitution:.28}));
-
-// ── Map & Platforms (Parking.glb) ──
-const platList=[]; // Array dikosongkan agar update animasi platfom lama tidak error
-
-// Load Map / Tanah
-loader.load('Parking.glb', function(gltf) {
-  const mapScene = gltf.scene;
-  scene.add(mapScene);
-
-  // Buat physics otomatis untuk setiap bangunan/tanah di map
-  mapScene.traverse(child => {
-    if (child.isMesh) {
-      child.receiveShadow = true;
-      child.castShadow = true;
-      
-      // Ambil ukuran & posisi persis objek di dunia
-      const box = new THREE.Box3().setFromObject(child);
-      if (!box.isEmpty()) {
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-        
-        // Berikan batas minimum ketebalan (0.05) agar physics tanah tidak tertembus
-        const hx = Math.max(size.x / 2, 0.05);
-        const hy = Math.max(size.y / 2, 0.05);
-        const hz = Math.max(size.z / 2, 0.05);
-        
-        const shape = new CANNON.Box(new CANNON.Vec3(hx, hy, hz));
-        const body = new CANNON.Body({ mass: 0, material: gMat });
-        body.addShape(shape);
-        body.position.set(center.x, center.y, center.z);
-        body.isPlatform = true;
-        phys.addBody(body);
-      }
-    }
-  });
-  checkStart();
-}, undefined, function(err) {
-  console.error(err);
-  btnStart.textContent = 'GAGAL MEMUAT MAP';
-});
-
 
 // ── Utils ──
 function hpHex(p){return p>.6?0x4caf50:p>.3?0xff9800:0xf44336;}
@@ -290,7 +306,6 @@ function hudUpdate(){
 // ═══════════════════════
 const P_COLORS=[0x3ab54a,0xe03020,0xff8c00,0x8833cc];
 const P_NAMES=['You','Bot 1','Bot 2','Bot 3'];
-const SPAWNS=[[-3,3.5,-3],[3,3.5,-3],[-3,3.5,3],[3,3.5,3]];
 
 class Player{
   constructor(id,isBot){
@@ -305,38 +320,56 @@ class Player{
 
     this.group=new THREE.Group();
 
-    // Clone model untuk tiap karakter menggunakan 1.glb
-    const mesh = charModel.clone();
+    // ── CLONE KARAKTER + TULANG ANIMASI ──
+    const mesh = THREE.SkeletonUtils.clone(charModel);
     
-    // Warnai model sesuai warna asli player/bot dan aktifkan bayangan
-    mesh.traverse((child) => {
-      if (child.isMesh) {
-        child.material = new THREE.MeshLambertMaterial({color: this.color});
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    // Auto-scale to fit 1.4 units tall
+    // Auto-scale to fit tapi ukurannya diperkecil (0.7 dari asli)
     const box=new THREE.Box3().setFromObject(mesh);
     const sz=new THREE.Vector3(); box.getSize(sz);
-    const sc=1.4/Math.max(sz.x,sz.y,sz.z);
+    const sc= 0.7 / Math.max(sz.x,sz.y,sz.z); 
     mesh.scale.setScalar(sc);
-    // Bottom at y=0
+    
     const box2=new THREE.Box3().setFromObject(mesh);
     mesh.position.y-=box2.min.y;
     this.group.add(mesh);
     this.modelNode=mesh;
 
-    // Billboards
+    // ── ANIMATION SETUP ──
+    this.mixer = new THREE.AnimationMixer(mesh);
+    this.actions = {};
+    this.currentAction = null;
+    
+    if (charAnimations && charAnimations.length > 0) {
+        charAnimations.forEach(clip => {
+            this.actions[clip.name.toLowerCase()] = this.mixer.clipAction(clip);
+        });
+        
+        // Coba cari nama animasi umum, jika tidak ada, pakai indeks
+        const getAnim = (names, fallbackIdx) => {
+            for(let n of names) {
+                let found = Object.keys(this.actions).find(k => k.includes(n));
+                if(found) return this.actions[found];
+            }
+            return charAnimations.length > fallbackIdx ? this.mixer.clipAction(charAnimations[fallbackIdx]) : null;
+        };
+        
+        this.animIdle = getAnim(['idle'], 0);
+        this.animWalk = getAnim(['walk', 'run', 'move'], 1) || this.animIdle;
+        this.animJump = getAnim(['jump', 'fly'], 2) || this.animWalk;
+        this.animPunch = getAnim(['punch', 'attack', 'hit'], 3) || this.animJump;
+        
+        this.playAnim(this.animIdle);
+    }
+
+    // Billboards (Nama Karakter dan HP di atas kepala)
     this.nSprite=makeSprite(this.name,this.color);
-    this.nSprite.position.y=1.75;this.group.add(this.nSprite);
+    this.nSprite.position.y=1.5;this.group.add(this.nSprite);
     this.hpBg=makeBar(0x222222);this.hpFg=makeBar(this.color);
-    this.hpBg.position.set(0,1.35,.01);this.hpFg.position.set(0,1.35,.02);
+    this.hpBg.position.set(0,1.15,.01);this.hpFg.position.set(0,1.15,.02);
     this.group.add(this.hpBg);this.group.add(this.hpFg);
 
     // Ground shadow
-    this.shdMesh=new THREE.Mesh(new THREE.CircleGeometry(.5,14),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.3}));
+    this.shdMesh=new THREE.Mesh(new THREE.CircleGeometry(.4,14),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.3}));
     this.shdMesh.rotation.x=-Math.PI/2;this.shdMesh.position.y=.02;
     this.group.add(this.shdMesh);
 
@@ -344,21 +377,46 @@ class Player{
 
     // Physics
     this.body=new CANNON.Body({mass:2,material:pMat,linearDamping:.52,angularDamping:1});
-    this.body.addShape(new CANNON.Sphere(.48));
-    this.body.position.set(...SPAWNS[id]);
+    this.body.addShape(new CANNON.Sphere(.38)); // Radius hitbox diperkecil seimbang dgn karakter
+    
     this.body.fixedRotation=true;this.body.updateMassProperties();this.body.playerId=id;
     phys.addBody(this.body);
+    this.respawn(); // Panggil respawn awal agar berada di tempat acak
   }
+
   get px(){return this.body.position.x;}
   get py(){return this.body.position.y;}
   get pz(){return this.body.position.z;}
 
+  playAnim(anim, speed = 1) {
+      if(!anim || this.currentAction === anim) return;
+      anim.reset().fadeIn(0.15).play();
+      anim.setEffectiveTimeScale(speed);
+      if(this.currentAction) this.currentAction.fadeOut(0.15);
+      this.currentAction = anim;
+  }
+
   respawn(){
-    const s=SPAWNS[this.id];
-    this.body.position.set(s[0]+(Math.random()-.5)*2,s[1]+3,s[2]+(Math.random()-.5)*2);
+    // Cari lokasi random berdasarkan list map yang ada (Parkir/Platform)
+    let sx = 0, sy = 10, sz = 0;
+    if(platBoxes.length > 0) {
+        // Pilih kotak random
+        const b = platBoxes[Math.floor(Math.random() * platBoxes.length)];
+        sx = b.min.x + Math.random()*(b.max.x - b.min.x);
+        sz = b.min.z + Math.random()*(b.max.z - b.min.z);
+        sy = b.max.y + 4; // Jatuh dari ketinggian 4
+    } else {
+        // Fallback jika aneh
+        sx = (Math.random()-.5)*10;
+        sz = (Math.random()-.5)*10;
+        sy = 10;
+    }
+    
+    this.body.position.set(sx, sy, sz);
     this.body.velocity.set(0,0,0);this.body.angularVelocity.set(0,0,0);
     this.hp=100;this.stunT=0;this.invT=110;this.group.visible=true;
   }
+
   takeDmg(dmg,ix,iy,iz,src){
     if(this.invT>0||!this.alive)return;
     this.hp-=dmg;
@@ -419,16 +477,38 @@ class Player{
     if(fd<2.5){if(this.punchCD<=0&&Math.random()<.07)this.punch(all);if(this.grabCD<=0&&Math.random()<.03)this.grab(all);}
     if(fd<5.5&&this.specCD<=0&&Math.random()<.005)this.special(all);
   }
-  update(all){
+  update(all, dt){
     if(!this.alive)return;
     if(this.punchCD>0)this.punchCD--;if(this.grabCD>0)this.grabCD--;if(this.specCD>0)this.specCD--;
     if(this.stunT>0)this.stunT--;if(this.invT>0)this.invT--;
     if(this.comboT>0)this.comboT--;else this.combo=0;
-    this.group.position.set(this.px,this.py-.5,this.pz);
+    
+    this.group.position.set(this.px,this.py-.4,this.pz); // Penyesuaian Y karena karakter di perkecil
     this.group.rotation.y=this.facing;
     this.group.visible=this.alive&&!(this.invT>0&&(this.invT/6|0)%2===0);
-    if(this.punchCD>20){const t=(this.punchCD-20)/8;this.modelNode.scale.set(1+t*.15,1-t*.1,1+t*.15);}
-    else{const s=1.4/Math.max(...(()=>{const b=new THREE.Box3().setFromObject(this.modelNode);const v=new THREE.Vector3();b.getSize(v);return[v.x,v.y,v.z];})());this.modelNode.scale.setScalar(this.modelNode.scale.x>0?this.modelNode.scale.x:1);}
+    
+    // UPDATE ANIMASI
+    if(this.mixer) this.mixer.update(dt);
+    
+    const hs=Math.sqrt(this.body.velocity.x**2+this.body.velocity.z**2);
+
+    // SISTEM STATE ANIMASI
+    if(this.punchCD > 10) {
+        this.playAnim(this.animPunch, 1.5);
+    } else if (!this.onGround) {
+        this.playAnim(this.animJump, 1);
+    } else if (hs > 1.5) {
+        this.playAnim(this.animWalk, 1.2);
+    } else {
+        this.playAnim(this.animIdle, 1);
+    }
+
+    // CLUMSY EFFECT (Miring saat lari ala Human Fall Flat)
+    const targetTiltX = this.onGround ? this.body.velocity.z * 0.025 : 0;
+    const targetTiltZ = this.onGround ? -this.body.velocity.x * 0.025 : 0;
+    this.modelNode.rotation.x += (targetTiltX - this.modelNode.rotation.x) * 0.15;
+    this.modelNode.rotation.z += (targetTiltZ - this.modelNode.rotation.z) * 0.15;
+
     const pct=this.hp/100;
     this.hpFg.scale.x=Math.max(.01,pct);this.hpFg.position.x=(pct-1)*.6;
     this.hpFg.material.color.setHex(hpHex(pct));
@@ -436,9 +516,11 @@ class Player{
     this.hpBg.quaternion.copy(camera.quaternion);
     this.hpFg.quaternion.copy(camera.quaternion);
     const sc=Math.max(.05,1-Math.max(0,this.py)*.07);this.shdMesh.scale.set(sc,sc,sc);
-    const hs=Math.sqrt(this.body.velocity.x**2+this.body.velocity.z**2);
+    
     if(hs>12){this.body.velocity.x=this.body.velocity.x/hs*12;this.body.velocity.z=this.body.velocity.z/hs*12;}
-    if(this.py<-7)this.takeDmg(this.hp,0,0,0,null);
+    
+    // JIKA JATUH DI LUAR MAP / DI BAWAH BATAS BAWAH MAP = MATI INSTAN
+    if(this.py < lowestY) this.takeDmg(this.hp, 0, 0, 0, null);
   }
 }
 
@@ -546,7 +628,10 @@ function loop(t){
       if(keys['KeyC']&&!keys['_gh']){p0.grab(players);keys['_gh']=true;}if(!keys['KeyC'])keys['_gh']=false;
       if(keys['KeyV']&&!keys['_sh']){p0.special(players);keys['_sh']=true;}if(!keys['KeyV'])keys['_sh']=false;
     }
-    players.forEach(p=>{p.update(players);if(p.isBot)p.updateBot(players);});
+    
+    // Pass 'dt' to update animations
+    players.forEach(p=>{p.update(players, dt);if(p.isBot)p.updateBot(players);});
+    
     for(let i=fxList.length-1;i>=0;i--){
       const m=fxList[i];m._life-=.04;m.position.addScaledVector(m._v,dt);m._v.y-=16*dt;
       m.material.opacity=m._life;m.material.transparent=true;
@@ -556,7 +641,6 @@ function loop(t){
       const m=waveList[i];m._life-=.05;const s=(1-m._life)*8;m.scale.set(s,s,s);m.material.opacity=m._life*.65;
       if(m._life<=0){scene.remove(m);waveList.splice(i,1);}
     }
-    platList.forEach((pl,i)=>{if(pl.baseY>.5)pl.mesh.position.y=pl.baseY+Math.sin(t*.0008+i*.9)*.05;});
   }
   updateCam();
   renderer.render(scene,camera);
