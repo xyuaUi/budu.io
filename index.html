@@ -2,12 +2,17 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
 <title>Budu.io 3D</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Segoe UI',sans-serif;touch-action:none;}
 canvas{display:block;}
+
+/* Peringatan Wajib Landscape */
+#landscape-warning { display: none; position: fixed; inset: 0; background: rgba(13, 16, 32, 0.95); backdrop-filter: blur(10px); color: #f5c030; z-index: 99999; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; text-align: center; padding: 40px; text-transform: uppercase; line-height: 1.5; letter-spacing: 2px;}
+@media (orientation: portrait) { #landscape-warning { display: flex; flex-direction: column; gap: 20px;} }
+
 #hud{position:fixed;inset:0;pointer-events:none;z-index:10;}
 #hud-top{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.65);border:1.5px solid rgba(255,255,255,0.15);border-radius:999px;padding:6px 20px;backdrop-filter:blur(8px);}
 #hud-timer{font-size:22px;font-weight:800;color:#f5c030;min-width:34px;text-align:center;}
@@ -25,19 +30,19 @@ canvas{display:block;}
 .kf-msg{background:rgba(0,0,0,0.7);border-radius:99px;padding:3px 14px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.9);white-space:nowrap;animation:kfpop .25s ease,kffade .4s ease 2.2s forwards;}
 @keyframes kfpop{from{transform:scale(0.7);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes kffade{to{opacity:0}}
-#controls{position:fixed;bottom:0;left:0;right:0;height:160px;pointer-events:all;display:flex;align-items:flex-end;justify-content:space-between;padding:0 16px 16px;}
+#controls{position:fixed;bottom:0;left:0;right:0;height:140px;pointer-events:all;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 20px;}
 #joystick-zone{width:124px;height:124px;position:relative;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.18);border-radius:50%;flex-shrink:0;}
 #joystick-knob{width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,0.28);border:2px solid rgba(255,255,255,0.5);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;}
-#cam-zone{flex:1;height:120px;margin:0 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:14px;display:flex;align-items:center;justify-content:center;pointer-events:all;}
-#cam-label{font-size:10px;color:rgba(255,255,255,0.28);text-transform:uppercase;letter-spacing:1px;user-select:none;pointer-events:none;text-align:center;line-height:1.6;}
-#action-btns{display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
-.act-row{display:flex;gap:8px;}
-.act-btn{border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;-webkit-tap-highlight-color:transparent;border:2.5px solid rgba(255,255,255,0.3);user-select:none;transition:transform .1s,opacity .1s;width:52px;height:52px;}
+#cam-zone{flex:1;height:120px;margin:0 10px;background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.05);border-radius:14px;display:flex;align-items:center;justify-content:center;pointer-events:all;}
+#cam-label{font-size:10px;color:rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:1px;user-select:none;pointer-events:none;text-align:center;line-height:1.6;}
+#action-btns{display:flex;flex-direction:column;gap:12px;align-items:flex-end;}
+.act-row{display:flex;gap:12px;}
+.act-btn{border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;-webkit-tap-highlight-color:transparent;border:2.5px solid rgba(255,255,255,0.3);user-select:none;transition:transform .1s,opacity .1s;width:58px;height:58px;}
 .act-btn:active,.act-btn.pressed{transform:scale(0.84);opacity:0.65;}
-#btn-jump{background:rgba(80,200,80,0.3);border-color:rgba(80,200,80,0.7);width:62px;height:62px;font-size:22px;}
+#btn-jump{background:rgba(80,200,80,0.3);border-color:rgba(80,200,80,0.7);width:68px;height:68px;font-size:26px;}
 #btn-punch{background:rgba(230,80,80,0.3);border-color:rgba(230,80,80,0.7);}
 #btn-grab{background:rgba(80,130,230,0.3);border-color:rgba(80,130,230,0.7);}
-#btn-spec{background:rgba(180,80,230,0.3);border-color:rgba(180,80,230,0.7);width:44px;height:44px;font-size:16px;}
+#btn-spec{background:rgba(180,80,230,0.3);border-color:rgba(180,80,230,0.7);width:48px;height:48px;font-size:18px;}
 .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);pointer-events:none;opacity:0;transition:opacity .35s;z-index:20;}
 .overlay.show{opacity:1;pointer-events:all;}
 .ov-title{font-size:clamp(28px,6vw,58px);font-weight:900;color:#f5c030;text-shadow:0 4px 0 #8a5000;text-transform:uppercase;letter-spacing:2px;}
@@ -62,6 +67,12 @@ canvas{display:block;}
 </style>
 </head>
 <body>
+
+<div id="landscape-warning">
+  <span>📱 Putar HP Kamu!</span>
+  <span style="font-size:14px; font-weight:normal; color:#aaa;">Game ini didesain khusus untuk layar Landscape (Miring).</span>
+</div>
+
 <div id="hud">
   <div id="hud-top"><span id="hud-mode">Last Standing</span><span id="hud-timer">90</span></div>
   <div id="hud-players">
@@ -78,7 +89,7 @@ canvas{display:block;}
 
 <div id="controls">
   <div id="joystick-zone"><div id="joystick-knob"></div></div>
-  <div id="cam-zone"><span id="cam-label">↔ Drag<br>putar kamera</span></div>
+  <div id="cam-zone"><span id="cam-label">↔ Drag Kamera</span></div>
   <div id="action-btns">
     <div class="act-row"><div class="act-btn" id="btn-spec">⚡</div><div class="act-btn" id="btn-grab">🤝</div></div>
     <div class="act-row"><div class="act-btn" id="btn-punch">👊</div><div class="act-btn" id="btn-jump">🦘</div></div>
@@ -153,7 +164,7 @@ phys.gravity.set(0,-26,0);
 phys.broadphase=new CANNON.NaiveBroadphase();
 phys.solver.iterations=10;
 
-// Anti Memantul (Bouncing) agar terasa berbobot
+// Anti Memantul (Bouncing)
 const gMat=new CANNON.Material('g'),pMat=new CANNON.Material('p');
 phys.addContactMaterial(new CANNON.ContactMaterial(gMat,pMat,{friction:0.5, restitution:0.0}));
 phys.addContactMaterial(new CANNON.ContactMaterial(pMat,pMat,{friction:0.3, restitution:0.0}));
@@ -164,8 +175,6 @@ let lowestY = -15;
 
 loader.load('Parking.glb', function(gltf) {
   const mapScene = gltf.scene;
-  
-  // PERBESAR MAP 4X LIPAT & UPDATE MATRIX AGAR FISIKA AKURAT
   mapScene.scale.set(4, 4, 4); 
   mapScene.updateMatrixWorld(true);
   scene.add(mapScene);
@@ -180,15 +189,13 @@ loader.load('Parking.glb', function(gltf) {
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         
-        // PENEBALAN SOLID BOX (Minimal tebal tanah 2 meter agar tidak tembus)
         const hx = Math.max(size.x / 2, 0.2);
-        const hy = Math.max(size.y / 2, 1.0); // 1.0 = Tebal minimal 2 meter
+        const hy = Math.max(size.y / 2, 1.0); 
         const hz = Math.max(size.z / 2, 0.2);
         
         const shape = new CANNON.Box(new CANNON.Vec3(hx, hy, hz));
         const body = new CANNON.Body({ mass: 0, material: gMat });
         body.addShape(shape);
-        // Menyesuaikan posisi karena box ditebalkan
         body.position.set(center.x, center.y, center.z);
         body.isPlatform = true;
         phys.addBody(body);
@@ -221,8 +228,6 @@ window.addEventListener('resize',()=>{
 });
 
 const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,200);
-camera.position.set(0,18,26);
-
 // ── Lights & Stars ──
 scene.add(new THREE.AmbientLight(0x667799,1.6));
 const sun=new THREE.DirectionalLight(0xfff0dd,2.4);
@@ -339,12 +344,13 @@ class Player{
     const sc= 0.7 / Math.max(sz.x,sz.y,sz.z); 
     mesh.scale.setScalar(sc);
     
+    // Menyelaraskan model visual agar Y=0 tepat berada di tapak kaki
     const box2=new THREE.Box3().setFromObject(mesh);
     mesh.position.y-=box2.min.y;
     this.group.add(mesh);
     this.modelNode=mesh;
 
-    // ── ANIMATION SETUP ──
+    // ── ANIMATION SETUP DENGAN SMOOTH BLENDING ──
     this.mixer = new THREE.AnimationMixer(mesh);
     this.actions = {};
     this.currentAction = null;
@@ -382,9 +388,10 @@ class Player{
 
     scene.add(this.group);
 
-    // Fisika karakter lebih diredam (Damping tinggi) agar tidak licin seperti es
     this.body=new CANNON.Body({mass:2,material:pMat,linearDamping:0.8,angularDamping:1});
-    this.body.addShape(new CANNON.Sphere(.38)); 
+    // Radius hitbox
+    this.bodyRadius = 0.38;
+    this.body.addShape(new CANNON.Sphere(this.bodyRadius)); 
     
     this.body.fixedRotation=true;this.body.updateMassProperties();this.body.playerId=id;
     phys.addBody(this.body);
@@ -394,16 +401,23 @@ class Player{
   get py(){return this.body.position.y;}
   get pz(){return this.body.position.z;}
 
+  // Fungsi PlayAnim dirubah menggunakan metode crossFadeTo agar pergerakan membaur sangat halus
   playAnim(anim, speed = 1) {
       if(!anim || this.currentAction === anim) return;
-      anim.reset().fadeIn(0.15).play();
+      anim.enabled = true;
       anim.setEffectiveTimeScale(speed);
-      if(this.currentAction) this.currentAction.fadeOut(0.15);
+      anim.setEffectiveWeight(1);
+      
+      if(this.currentAction) {
+          // Fade mulus dalam 0.25 detik dari gerak lama ke gerak baru
+          this.currentAction.crossFadeTo(anim, 0.25, true);
+      }
+      anim.play();
       this.currentAction = anim;
   }
 
   respawn(initial = false){
-    let sx = 0, sy = 30, sz = 0; // JATUH DARI ATAS (Y=30)
+    let sx = 0, sy = 30, sz = 0;
     if(platBoxes.length > 0) {
         const b = platBoxes[Math.floor(Math.random() * platBoxes.length)];
         sx = b.min.x + Math.random()*(b.max.x - b.min.x);
@@ -436,7 +450,6 @@ class Player{
     hudUpdate();
   }
   
-  // Lompatan dikurangi kekuatannya & hanya bisa Single Jump
   jump(){if(this.jumpCount>=1)return;this.body.velocity.y=8.5;this.jumpCount++;this.onGround=false;}
   
   punch(all){
@@ -444,7 +457,8 @@ class Player{
     all.forEach(p=>{
       if(p===this||!p.alive)return;
       const dx=p.px-this.px,dy=p.py-this.py,dz=p.pz-this.pz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      if(d<2.5){const f=9/d;p.takeDmg(16+Math.random()*9|0,dx*f,4.5,dz*f,this);shake(5);hitFx(p.group.position);}
+      // PUKULAN NORMAL: Sumbu Y diubah ke 1.5 agar tidak melayang (terbang)
+      if(d<2.5){const f=9/d;p.takeDmg(16+Math.random()*9|0,dx*f, 1.5, dz*f,this);shake(5);hitFx(p.group.position);}
     });
   }
   grab(all){
@@ -453,9 +467,10 @@ class Player{
     all.forEach(p=>{
       if(p===this||!p.alive)return;
       const dx=p.px-this.px,dy=p.py-this.py,dz=p.pz-this.pz;
+      // GRAB NORMAL: Lompatan Y dirubah dari 8 ke 2
       if(Math.sqrt(dx*dx+dy*dy+dz*dz)<2.8){
-        const pw=14+this.combo*.5;p.body.velocity.set(fx*pw,8,fz*pw);
-        p.takeDmg(12,fx*8,3,fz*8,this);shake(4);
+        const pw=14+this.combo*.5;p.body.velocity.set(fx*pw, 2, fz*pw);
+        p.takeDmg(12,fx*8, 1, fz*8,this);shake(4);
       }
     });
   }
@@ -464,7 +479,8 @@ class Player{
     all.forEach(p=>{
       if(p===this||!p.alive)return;
       const dx=p.px-this.px,dy=p.py-this.py,dz=p.pz-this.pz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      if(d<5.5){const pct=1-d/5.5,f=pct*13;p.takeDmg(Math.floor(26*pct),(dx/d)*f,5,(dz/d)*f,this);}
+      // SPECIAL NORMAL: Sumbu Y ke atas diubah menjadi 2
+      if(d<5.5){const pct=1-d/5.5,f=pct*13;p.takeDmg(Math.floor(26*pct),(dx/d)*f, 2, (dz/d)*f,this);}
     });
     waveFx(this.group.position.clone());shake(9);
   }
@@ -488,28 +504,25 @@ class Player{
     if(this.stunT>0)this.stunT--;if(this.invT>0)this.invT--;
     if(this.comboT>0)this.comboT--;else this.combo=0;
     
-    this.group.position.set(this.px,this.py-.4,this.pz); 
+    // FIX MELAYANG: Kurangi Y dengan radius body fisika agar visual pas sentuh aspal tanah
+    this.group.position.set(this.px, this.py - this.bodyRadius, this.pz); 
     this.group.rotation.y=this.facing;
     this.group.visible=this.alive&&!(this.invT>0&&(this.invT/6|0)%2===0);
     
     const hs=Math.sqrt(this.body.velocity.x**2+this.body.velocity.z**2);
 
-    // SISTEM STATE ANIMASI (Freeze jika diam)
+    // SISTEM STATE ANIMASI CERDAS
     if(this.mixer) {
         if(this.punchCD > 10) {
             this.playAnim(this.animPunch, 1.5);
-            this.mixer.timeScale = 1;
         } else if (!this.onGround) {
             this.playAnim(this.animJump, 1);
-            this.mixer.timeScale = 1;
-        } else if (hs > 0.5) {
-            this.playAnim(this.animWalk, 1.2);
-            this.mixer.timeScale = 1;
+        } else if (hs > 0.6) {
+            // Berjalan: Dipercepat agar sinkron dgn kecepatan
+            this.playAnim(this.animWalk, 1.4); 
         } else {
-            // JIKA DIAM: Bekukan animasi (jangan animasikan apapun)
+            // Diam/Idle sempurna: pastikan kecepatan animasinya normal dan tidak bug loop berjalan
             this.playAnim(this.animIdle, 1);
-            if(hs < 0.1) this.mixer.timeScale = 0; 
-            else this.mixer.timeScale = 1;
         }
         this.mixer.update(dt);
     }
@@ -525,7 +538,7 @@ class Player{
     this.nSprite.quaternion.copy(camera.quaternion);
     this.hpBg.quaternion.copy(camera.quaternion);
     this.hpFg.quaternion.copy(camera.quaternion);
-    const sc=Math.max(.05,1-Math.max(0,this.py)*.07);this.shdMesh.scale.set(sc,sc,sc);
+    const shd_sc=Math.max(.05,1-Math.max(0,this.py)*.07);this.shdMesh.scale.set(shd_sc,shd_sc,shd_sc);
     
     if(hs>12){this.body.velocity.x=this.body.velocity.x/hs*12;this.body.velocity.z=this.body.velocity.z/hs*12;}
     if(this.py < lowestY) this.takeDmg(this.hp, 0, 0, 0, null);
@@ -550,17 +563,23 @@ let jA=false,jSX=0,jSY=0,jDX=0,jDZ=0;const JMAX=46;
 jZone.addEventListener('touchstart',e=>{e.preventDefault();const r=jZone.getBoundingClientRect();jSX=r.left+r.width/2;jSY=r.top+r.height/2;jA=true;},{passive:false});
 jZone.addEventListener('touchmove', e=>{e.preventDefault();if(!jA)return;let dx=e.touches[0].clientX-jSX,dy=e.touches[0].clientY-jSY;const l=Math.sqrt(dx*dx+dy*dy);if(l>JMAX){dx=dx/l*JMAX;dy=dy/l*JMAX;}jKnob.style.cssText=`left:${50+dx/JMAX*40}%;top:${50+dy/JMAX*40}%;transform:translate(-50%,-50%)`;jDX=dx/JMAX;jDZ=dy/JMAX;},{passive:false});
 jZone.addEventListener('touchend',  e=>{e.preventDefault();jA=false;jDX=0;jDZ=0;jKnob.style.cssText='left:50%;top:50%;transform:translate(-50%,-50%)';});
+
+// ── SETTING KAMERA PARTY ANIMALS ──
 const camZ=document.getElementById('cam-zone');
-let camDrag=false,camLX=0,camLY=0,camH=0,camV=0.25,camDist=12; // Kamera Default Lebih Dekat & Rendah (3rd Person)
-function onCamD(dx,dy){camH-=dx*.008;camV=Math.max(.14,Math.min(1.1,camV-dy*.005));}
+let camDrag=false,camLX=0,camLY=0,camH=0;
+let camV = 0.15; // Jauh lebih rendah
+let camDist = 5.5; // Sangat dekat dari belakang
+function onCamD(dx,dy){camH-=dx*.008;camV=Math.max(.10,Math.min(1.1,camV-dy*.005));}
+
 camZ.addEventListener('touchstart',e=>{e.preventDefault();camDrag=true;camLX=e.touches[0].clientX;camLY=e.touches[0].clientY;},{passive:false});
 camZ.addEventListener('touchmove', e=>{e.preventDefault();if(!camDrag)return;onCamD(e.touches[0].clientX-camLX,e.touches[0].clientY-camLY);camLX=e.touches[0].clientX;camLY=e.touches[0].clientY;},{passive:false});
 camZ.addEventListener('touchend',  ()=>{camDrag=false;});
-window.addEventListener('mousedown',e=>{if(e.button===2){camDrag=true;camLX=e.clientX;camLY=e.clientY;}});
+window.addEventListener('mousedown',e=>{if(e.button===2||e.button===0){camDrag=true;camLX=e.clientX;camLY=e.clientY;}});
 window.addEventListener('mousemove',e=>{if(camDrag){onCamD(e.clientX-camLX,e.clientY-camLY);camLX=e.clientX;camLY=e.clientY;}});
-window.addEventListener('mouseup',  e=>{if(e.button===2)camDrag=false;});
+window.addEventListener('mouseup',  e=>{camDrag=false;});
 window.addEventListener('contextmenu',e=>e.preventDefault());
-window.addEventListener('wheel',e=>{camDist=Math.max(8,Math.min(30,camDist+e.deltaY*.022));});
+window.addEventListener('wheel',e=>{camDist=Math.max(3,Math.min(20,camDist+e.deltaY*.022));});
+
 function bindBtn(id,code){
   const el=document.getElementById(id);if(!el)return;
   el.addEventListener('touchstart',e=>{e.preventDefault();keys[code]=true;el.classList.add('pressed');},{passive:false});
@@ -593,7 +612,7 @@ function runCountdown() {
       cd.className = 'cd-text pop'; cd.textContent = '1';
       setTimeout(() => {
         cd.className = 'cd-text pop'; cd.textContent = 'GO!';
-        gameReady = true; // Input pemain baru bisa digunakan setelah GO
+        gameReady = true; 
         setTimeout(() => { cd.className = 'cd-text'; }, 1000);
       }, 1000);
     }, 1000);
@@ -606,7 +625,6 @@ function initGame(){
   waveList.forEach(m=>scene.remove(m));waveList.length=0;
   for(let i=0;i<4;i++)document.getElementById('card-'+i).classList.remove('dead');
   
-  // Buat Player baru dan spawn di atas langit
   players=[0,1,2,3].map(i=>{
       const p = new Player(i,i!==0);
       p.respawn(true);
@@ -616,7 +634,7 @@ function initGame(){
   timer=90;document.getElementById('hud-timer').textContent=90;
   clearInterval(timerIv);
   timerIv=setInterval(()=>{
-    if(!gameReady) return; // Waktu tidak jalan selama countdown
+    if(!gameReady) return; 
     timer--;document.getElementById('hud-timer').textContent=timer;
     if(timer<=0){
       clearInterval(timerIv);
@@ -626,32 +644,33 @@ function initGame(){
     }
   },1000);
   hudUpdate();
-  gameOn=true; // Fisika nyala agar karakter jatuh
-  gameReady=false; // Input dimatikan
+  gameOn=true; 
+  gameReady=false; 
   runCountdown();
 }
 
 function updateCam(){
   const p0=players[0];
-  const focus=p0&&p0.alive?p0.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)):new THREE.Vector3(0,2,0);
-  camTgt.lerp(focus,.15);
+  const focus=p0&&p0.alive?p0.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)):new THREE.Vector3(0,2,0);
+  camTgt.lerp(focus,.2);
 
-  // AUTO FOLLOW CAMERA: Kamera otomatis memutar ke belakang punggung pemain (3rd Person feel)
+  // AUTO FOLLOW KAMERA CERDAS (Lebih tajam mengikuti gerakan seperti Action Game)
   if(p0 && p0.alive && gameReady) {
       const hs = Math.sqrt(p0.body.velocity.x**2 + p0.body.velocity.z**2);
-      if(hs > 1.0 && !camDrag && !jA) {
-          let targetH = p0.facing + Math.PI; // Belakang punggung
+      if(hs > 0.5 && !camDrag && !jA) {
+          let targetH = p0.facing + Math.PI; 
           let diff = targetH - camH;
           while(diff < -Math.PI) diff += Math.PI*2;
           while(diff > Math.PI) diff -= Math.PI*2;
-          camH += diff * 0.04; // Smooth lerp
+          camH += diff * 0.08; // Transisi putaran otomatis lebih mulus
       }
   }
 
   const tx=camTgt.x+Math.sin(camH)*Math.cos(camV)*camDist;
   const ty=camTgt.y+Math.sin(camV)*camDist;
   const tz=camTgt.z+Math.cos(camH)*Math.cos(camV)*camDist;
-  camera.position.lerp(new THREE.Vector3(tx,ty,tz),.2);
+  camera.position.lerp(new THREE.Vector3(tx,ty,tz),.3); // Follow lebih tajam
+  
   if(shakeAmt>.001){camera.position.x+=(Math.random()-.5)*shakeAmt;camera.position.y+=(Math.random()-.5)*shakeAmt;shakeAmt*=.78;}
   camera.lookAt(camTgt);
 }
@@ -665,7 +684,6 @@ function loop(t){
     phys.step(1/60,dt,3);checkGrounds();
     const p0=players[0];
     
-    // INPUT HANYA BISA JIKA SUDAH "GO!" (gameReady = true)
     if(p0&&p0.alive&&p0.stunT<=0 && gameReady){
       const fwd=new THREE.Vector3(-Math.sin(camH),0,-Math.cos(camH));
       const rgt=new THREE.Vector3(Math.cos(camH),0,-Math.sin(camH));
