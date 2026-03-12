@@ -164,7 +164,6 @@ phys.gravity.set(0,-26,0);
 phys.broadphase=new CANNON.NaiveBroadphase();
 phys.solver.iterations=10;
 
-// Anti Memantul (Bouncing)
 const gMat=new CANNON.Material('g'),pMat=new CANNON.Material('p');
 phys.addContactMaterial(new CANNON.ContactMaterial(gMat,pMat,{friction:0.5, restitution:0.0}));
 phys.addContactMaterial(new CANNON.ContactMaterial(pMat,pMat,{friction:0.3, restitution:0.0}));
@@ -189,14 +188,21 @@ loader.load('Parking.glb', function(gltf) {
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         
-        const hx = Math.max(size.x / 2, 0.2);
+        const hx = Math.max(size.x / 2, 0.05);
+        const hz = Math.max(size.z / 2, 0.05);
+        
+        // FIX MELAYANG: Kita atur agar titik ATAS lantai fisika sejajar presisi dengan visual
+        // hy diatur minimal 1.0 (tebal 2 meter) agar kokoh dan tidak tembus
         const hy = Math.max(size.y / 2, 1.0); 
-        const hz = Math.max(size.z / 2, 0.2);
         
         const shape = new CANNON.Box(new CANNON.Vec3(hx, hy, hz));
         const body = new CANNON.Body({ mass: 0, material: gMat });
         body.addShape(shape);
-        body.position.set(center.x, center.y, center.z);
+        
+        // Atur posisi fisika agar atapnya pas di box.max.y (permukaan aspal visual)
+        const physCenterY = box.max.y - hy;
+        
+        body.position.set(center.x, physCenterY, center.z);
         body.isPlatform = true;
         phys.addBody(body);
 
@@ -228,6 +234,7 @@ window.addEventListener('resize',()=>{
 });
 
 const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,200);
+
 // ── Lights & Stars ──
 scene.add(new THREE.AmbientLight(0x667799,1.6));
 const sun=new THREE.DirectionalLight(0xfff0dd,2.4);
@@ -336,7 +343,6 @@ class Player{
 
     this.group=new THREE.Group();
 
-    // ── CLONE KARAKTER ──
     const mesh = THREE.SkeletonUtils.clone(charModel);
     
     const box=new THREE.Box3().setFromObject(mesh);
@@ -344,13 +350,11 @@ class Player{
     const sc= 0.7 / Math.max(sz.x,sz.y,sz.z); 
     mesh.scale.setScalar(sc);
     
-    // Menyelaraskan model visual agar Y=0 tepat berada di tapak kaki
     const box2=new THREE.Box3().setFromObject(mesh);
     mesh.position.y-=box2.min.y;
     this.group.add(mesh);
     this.modelNode=mesh;
 
-    // ── ANIMATION SETUP DENGAN SMOOTH BLENDING ──
     this.mixer = new THREE.AnimationMixer(mesh);
     this.actions = {};
     this.currentAction = null;
@@ -389,7 +393,6 @@ class Player{
     scene.add(this.group);
 
     this.body=new CANNON.Body({mass:2,material:pMat,linearDamping:0.8,angularDamping:1});
-    // Radius hitbox
     this.bodyRadius = 0.38;
     this.body.addShape(new CANNON.Sphere(this.bodyRadius)); 
     
@@ -401,7 +404,6 @@ class Player{
   get py(){return this.body.position.y;}
   get pz(){return this.body.position.z;}
 
-  // Fungsi PlayAnim dirubah menggunakan metode crossFadeTo agar pergerakan membaur sangat halus
   playAnim(anim, speed = 1) {
       if(!anim || this.currentAction === anim) return;
       anim.enabled = true;
@@ -409,7 +411,6 @@ class Player{
       anim.setEffectiveWeight(1);
       
       if(this.currentAction) {
-          // Fade mulus dalam 0.25 detik dari gerak lama ke gerak baru
           this.currentAction.crossFadeTo(anim, 0.25, true);
       }
       anim.play();
@@ -422,10 +423,12 @@ class Player{
         const b = platBoxes[Math.floor(Math.random() * platBoxes.length)];
         sx = b.min.x + Math.random()*(b.max.x - b.min.x);
         sz = b.min.z + Math.random()*(b.max.z - b.min.z);
-        sy = initial ? 30 : b.max.y + 20; 
+        // Jika inisial awal, jatuh dari y=30. Jika respawn biasa, langsung muncul di atas tanah
+        sy = initial ? 30 : b.max.y + 0.5; 
     } else {
         sx = (Math.random()-.5)*10;
         sz = (Math.random()-.5)*10;
+        sy = initial ? 30 : 2;
     }
     
     this.body.position.set(sx, sy, sz);
@@ -450,14 +453,14 @@ class Player{
     hudUpdate();
   }
   
-  jump(){if(this.jumpCount>=1)return;this.body.velocity.y=8.5;this.jumpCount++;this.onGround=false;}
+  // FIX LOMPATAN: Kurangi kekuatan lompat agar tidak melayang terlalu tinggi
+  jump(){if(this.jumpCount>=1)return;this.body.velocity.y=6.5;this.jumpCount++;this.onGround=false;}
   
   punch(all){
     if(!this.alive||this.punchCD>0||this.stunT>0)return;this.punchCD=28;
     all.forEach(p=>{
       if(p===this||!p.alive)return;
       const dx=p.px-this.px,dy=p.py-this.py,dz=p.pz-this.pz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      // PUKULAN NORMAL: Sumbu Y diubah ke 1.5 agar tidak melayang (terbang)
       if(d<2.5){const f=9/d;p.takeDmg(16+Math.random()*9|0,dx*f, 1.5, dz*f,this);shake(5);hitFx(p.group.position);}
     });
   }
@@ -467,7 +470,6 @@ class Player{
     all.forEach(p=>{
       if(p===this||!p.alive)return;
       const dx=p.px-this.px,dy=p.py-this.py,dz=p.pz-this.pz;
-      // GRAB NORMAL: Lompatan Y dirubah dari 8 ke 2
       if(Math.sqrt(dx*dx+dy*dy+dz*dz)<2.8){
         const pw=14+this.combo*.5;p.body.velocity.set(fx*pw, 2, fz*pw);
         p.takeDmg(12,fx*8, 1, fz*8,this);shake(4);
@@ -479,7 +481,6 @@ class Player{
     all.forEach(p=>{
       if(p===this||!p.alive)return;
       const dx=p.px-this.px,dy=p.py-this.py,dz=p.pz-this.pz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      // SPECIAL NORMAL: Sumbu Y ke atas diubah menjadi 2
       if(d<5.5){const pct=1-d/5.5,f=pct*13;p.takeDmg(Math.floor(26*pct),(dx/d)*f, 2, (dz/d)*f,this);}
     });
     waveFx(this.group.position.clone());shake(9);
@@ -492,7 +493,7 @@ class Player{
     const tgt=this.botTarget||alive[0];if(!tgt.alive){this.botTarget=null;return;}
     const dx=tgt.px-this.px,dz=tgt.pz-this.pz,d2=Math.sqrt(dx*dx+dz*dz);
     this.facing=Math.atan2(dx,dz);
-    if(d2>1.5){const s=5.5;this.body.velocity.x=dx/d2*s;this.body.velocity.z=dz/d2*s;}
+    if(d2>1.5){const s=14;this.body.velocity.x=dx/d2*s;this.body.velocity.z=dz/d2*s;}
     if(this.onGround&&this.botJumpT<=0&&(tgt.py>this.py+1.5||Math.random()<.012)){this.jump();this.botJumpT=55;}
     const fd=Math.sqrt(dx*dx+(tgt.py-this.py)**2+dz*dz);
     if(fd<2.5){if(this.punchCD<=0&&Math.random()<.07)this.punch(all);if(this.grabCD<=0&&Math.random()<.03)this.grab(all);}
@@ -504,24 +505,22 @@ class Player{
     if(this.stunT>0)this.stunT--;if(this.invT>0)this.invT--;
     if(this.comboT>0)this.comboT--;else this.combo=0;
     
-    // FIX MELAYANG: Kurangi Y dengan radius body fisika agar visual pas sentuh aspal tanah
     this.group.position.set(this.px, this.py - this.bodyRadius, this.pz); 
     this.group.rotation.y=this.facing;
-    this.group.visible=this.alive&&!(this.invT>0&&(this.invT/6|0)%2===0);
+    
+    // FIX KEDIP: Karakter sekarang solid tidak berkedip meskipun invT (kebal pukulan spawn) masih ada
+    this.group.visible = this.alive;
     
     const hs=Math.sqrt(this.body.velocity.x**2+this.body.velocity.z**2);
 
-    // SISTEM STATE ANIMASI CERDAS
     if(this.mixer) {
         if(this.punchCD > 10) {
             this.playAnim(this.animPunch, 1.5);
         } else if (!this.onGround) {
             this.playAnim(this.animJump, 1);
         } else if (hs > 0.6) {
-            // Berjalan: Dipercepat agar sinkron dgn kecepatan
-            this.playAnim(this.animWalk, 1.4); 
+            this.playAnim(this.animWalk, 2.0); 
         } else {
-            // Diam/Idle sempurna: pastikan kecepatan animasinya normal dan tidak bug loop berjalan
             this.playAnim(this.animIdle, 1);
         }
         this.mixer.update(dt);
@@ -540,7 +539,7 @@ class Player{
     this.hpFg.quaternion.copy(camera.quaternion);
     const shd_sc=Math.max(.05,1-Math.max(0,this.py)*.07);this.shdMesh.scale.set(shd_sc,shd_sc,shd_sc);
     
-    if(hs>12){this.body.velocity.x=this.body.velocity.x/hs*12;this.body.velocity.z=this.body.velocity.z/hs*12;}
+    if(hs>18){this.body.velocity.x=this.body.velocity.x/hs*18;this.body.velocity.z=this.body.velocity.z/hs*18;}
     if(this.py < lowestY) this.takeDmg(this.hp, 0, 0, 0, null);
   }
 }
@@ -564,11 +563,10 @@ jZone.addEventListener('touchstart',e=>{e.preventDefault();const r=jZone.getBoun
 jZone.addEventListener('touchmove', e=>{e.preventDefault();if(!jA)return;let dx=e.touches[0].clientX-jSX,dy=e.touches[0].clientY-jSY;const l=Math.sqrt(dx*dx+dy*dy);if(l>JMAX){dx=dx/l*JMAX;dy=dy/l*JMAX;}jKnob.style.cssText=`left:${50+dx/JMAX*40}%;top:${50+dy/JMAX*40}%;transform:translate(-50%,-50%)`;jDX=dx/JMAX;jDZ=dy/JMAX;},{passive:false});
 jZone.addEventListener('touchend',  e=>{e.preventDefault();jA=false;jDX=0;jDZ=0;jKnob.style.cssText='left:50%;top:50%;transform:translate(-50%,-50%)';});
 
-// ── SETTING KAMERA PARTY ANIMALS ──
 const camZ=document.getElementById('cam-zone');
 let camDrag=false,camLX=0,camLY=0,camH=0;
-let camV = 0.15; // Jauh lebih rendah
-let camDist = 5.5; // Sangat dekat dari belakang
+let camV = 0.15; 
+let camDist = 5.5; 
 function onCamD(dx,dy){camH-=dx*.008;camV=Math.max(.10,Math.min(1.1,camV-dy*.005));}
 
 camZ.addEventListener('touchstart',e=>{e.preventDefault();camDrag=true;camLX=e.touches[0].clientX;camLY=e.touches[0].clientY;},{passive:false});
@@ -627,7 +625,7 @@ function initGame(){
   
   players=[0,1,2,3].map(i=>{
       const p = new Player(i,i!==0);
-      p.respawn(true);
+      p.respawn(true); // Parameter true menandakan spawn pertama kali (dari langit)
       return p;
   });
   
@@ -654,7 +652,6 @@ function updateCam(){
   const focus=p0&&p0.alive?p0.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)):new THREE.Vector3(0,2,0);
   camTgt.lerp(focus,.2);
 
-  // AUTO FOLLOW KAMERA CERDAS (Lebih tajam mengikuti gerakan seperti Action Game)
   if(p0 && p0.alive && gameReady) {
       const hs = Math.sqrt(p0.body.velocity.x**2 + p0.body.velocity.z**2);
       if(hs > 0.5 && !camDrag && !jA) {
@@ -662,14 +659,14 @@ function updateCam(){
           let diff = targetH - camH;
           while(diff < -Math.PI) diff += Math.PI*2;
           while(diff > Math.PI) diff -= Math.PI*2;
-          camH += diff * 0.08; // Transisi putaran otomatis lebih mulus
+          camH += diff * 0.08; 
       }
   }
 
   const tx=camTgt.x+Math.sin(camH)*Math.cos(camV)*camDist;
   const ty=camTgt.y+Math.sin(camV)*camDist;
   const tz=camTgt.z+Math.cos(camH)*Math.cos(camV)*camDist;
-  camera.position.lerp(new THREE.Vector3(tx,ty,tz),.3); // Follow lebih tajam
+  camera.position.lerp(new THREE.Vector3(tx,ty,tz),.3); 
   
   if(shakeAmt>.001){camera.position.x+=(Math.random()-.5)*shakeAmt;camera.position.y+=(Math.random()-.5)*shakeAmt;shakeAmt*=.78;}
   camera.lookAt(camTgt);
@@ -694,7 +691,8 @@ function loop(t){
       if(keys['ArrowDown']||keys['KeyS']){mx-=fwd.x;mz-=fwd.z;}
       if(jA){mx+=rgt.x*jDX+fwd.x*(-jDZ);mz+=rgt.z*jDX+fwd.z*(-jDZ);}
       const ml=Math.sqrt(mx*mx+mz*mz);
-      if(ml>.01){mx/=ml;mz/=ml;p0.body.velocity.x=mx*7;p0.body.velocity.z=mz*7;p0.facing=Math.atan2(mx,mz);}
+      
+      if(ml>.01){mx/=ml;mz/=ml;p0.body.velocity.x=mx*16;p0.body.velocity.z=mz*16;p0.facing=Math.atan2(mx,mz);}
       
       if((keys['KeyZ']||keys['Space'])&&!keys['_jh']){p0.jump();keys['_jh']=true;}
       if(!keys['KeyZ']&&!keys['Space'])keys['_jh']=false;
