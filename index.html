@@ -1026,20 +1026,18 @@ html, body {
   text-transform: uppercase; letter-spacing: 0.4px;
 }
 
-/* ── SLIDE TRANSITION ── */
+/* ── SLIDE TRANSITION — masuk dari kiri, keluar ke kanan ── */
 #slide-transition {
   position: fixed; inset: 0; z-index: 8000;
-  pointer-events: none; display: none;
-  -webkit-mask-image: radial-gradient(circle, black 0%, black 100%, transparent 100%);
-  mask-image: radial-gradient(circle, black 0%, black 100%, transparent 100%);
-  -webkit-mask-size: 0% 0%; mask-size: 0% 0%;
-  -webkit-mask-position: center; mask-position: center;
-  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  pointer-events: none;
+  clip-path: inset(0 100% 0 0);
   background: #1a0a00;
+  will-change: clip-path;
 }
-#slide-img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;will-change:transform; }
-@keyframes mask-expand   { 0%{-webkit-mask-size:0% 0%;mask-size:0% 0%}100%{-webkit-mask-size:300% 300%;mask-size:300% 300%} }
-@keyframes mask-collapse { 0%{-webkit-mask-size:300% 300%;mask-size:300% 300%}100%{-webkit-mask-size:0% 0%;mask-size:0% 0%} }
+#slide-transition.visible { pointer-events: all; }
+#slide-img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover; }
+@keyframes slide-enter { 0%{clip-path:inset(0 100% 0 0)} 100%{clip-path:inset(0 0% 0 0)} }
+@keyframes slide-exit  { 0%{clip-path:inset(0 0% 0 0)}   100%{clip-path:inset(0 0% 0 100%)} }
 
 /* ── ROTATE OVERLAY ── */
 #rotate-overlay {
@@ -1595,38 +1593,235 @@ async function showNotif(avatarSrc, name) {
   pill.classList.add('hide');
 }
 
-// ── Mask Transition ──
-const MASK_MS = 550;
-async function maskIn() {
-  const wrap = document.getElementById('slide-transition');
-  wrap.style.display = 'block';
-  wrap.style.pointerEvents = 'all';
-  wrap.style.animation = 'none';
-  wrap.style.webkitMaskSize = '0% 0%'; wrap.style.maskSize = '0% 0%';
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-  wrap.style.animation = `mask-expand ${MASK_MS}ms cubic-bezier(0.4,0,0.2,1) forwards`;
-  wrap.style.webkitAnimation = `mask-expand ${MASK_MS}ms cubic-bezier(0.4,0,0.2,1) forwards`;
-  await wait(MASK_MS);
+// ══════════════════════════════════════════════════════════════
+// SLIDE TRANSITION — masuk dari kiri, keluar ke kanan
+// ══════════════════════════════════════════════════════════════
+const SLIDE_MS = 480;
+const slideEl  = document.getElementById('slide-transition');
+
+function slideEnter() {
+  return new Promise(resolve => {
+    slideEl.style.animation = 'none';
+    slideEl.style.clipPath  = 'inset(0 100% 0 0)';
+    slideEl.classList.add('visible');
+    // force reflow
+    void slideEl.offsetWidth;
+    slideEl.style.animation = `slide-enter ${SLIDE_MS}ms cubic-bezier(0.4,0,0.2,1) forwards`;
+    setTimeout(resolve, SLIDE_MS);
+  });
 }
-async function maskOut() {
-  const wrap = document.getElementById('slide-transition');
-  wrap.style.animation = `mask-collapse ${MASK_MS}ms cubic-bezier(0.4,0,0.2,1) forwards`;
-  wrap.style.webkitAnimation = `mask-collapse ${MASK_MS}ms cubic-bezier(0.4,0,0.2,1) forwards`;
-  await wait(MASK_MS);
-  wrap.style.pointerEvents = 'none';
-  wrap.style.display = 'none';
-  wrap.style.animation = 'none';
-  wrap.style.webkitMaskSize = '0% 0%'; wrap.style.maskSize = '0% 0%';
+
+function slideExit() {
+  return new Promise(resolve => {
+    slideEl.style.animation = 'none';
+    slideEl.style.clipPath  = 'inset(0 0% 0 0)';
+    void slideEl.offsetWidth;
+    slideEl.style.animation = `slide-exit ${SLIDE_MS}ms cubic-bezier(0.4,0,0.2,1) forwards`;
+    setTimeout(() => {
+      slideEl.classList.remove('visible');
+      slideEl.style.animation = 'none';
+      slideEl.style.clipPath  = 'inset(0 100% 0 0)';
+      resolve();
+    }, SLIDE_MS);
+  });
 }
-async function slideShow(onAt7s, totalMs = 10000) {
-  await maskIn();
-  let at7Fired = false;
-  const t7 = setTimeout(() => { at7Fired = true; if (typeof onAt7s === 'function') onAt7s(); }, 7000);
-  await wait(totalMs);
-  clearTimeout(t7);
-  if (!at7Fired && typeof onAt7s === 'function') onAt7s();
+
+// ══════════════════════════════════════════════════════════════
+// AUDIO ENGINE — satu AudioContext, dua track terpisah
+// Aturan:
+//   • Setiap audio punya graph sendiri (source→lowpass→dry/wet→gain→dest)
+//   • Ketika splashloading MUNCUL  → audio BARU sudah jalan (cave), audio LAMA fade out
+//   • Ketika splashloading KELUAR  → audio aktif dinormalkan
+//   • Cave = lowpass 600Hz + reverb dominan
+//   • Normal = lowpass 18000Hz + reverb hilang
+// ══════════════════════════════════════════════════════════════
+let audioCtx = null;
+
+// ── Cave IR builder (shared) ──
+function buildCaveIR(ctx) {
+  return new Promise(resolve => {
+    const len = Math.floor(ctx.sampleRate * 3.5);
+    const ir  = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++)
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+    }
+    resolve(ir);
+  });
 }
-async function slideOut() { await maskOut(); }
+
+// ── Track factory: buat graph untuk satu audio element ──
+// Mengembalikan objek { play, pause, setCave, setNormal, fadeIn, fadeOut }
+function createTrack(audioEl) {
+  let lowpass, convolver, dry, wet, masterGain;
+  let ready = false;
+
+  function build() {
+    if (ready) return;
+    if (!audioCtx) return;
+    const src = audioCtx.createMediaElementSource(audioEl);
+    masterGain = audioCtx.createGain();
+    lowpass    = audioCtx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 18000; // default normal
+    lowpass.Q.value = 1.2;
+    convolver  = audioCtx.createConvolver();
+    buildCaveIR(audioCtx).then(ir => { convolver.buffer = ir; });
+    dry = audioCtx.createGain();
+    wet = audioCtx.createGain();
+    dry.gain.value = 1.0;
+    wet.gain.value = 0.0;
+    masterGain.gain.value = 0; // mulai silent
+    src.connect(lowpass);
+    lowpass.connect(dry);
+    lowpass.connect(convolver);
+    convolver.connect(wet);
+    dry.connect(masterGain);
+    wet.connect(masterGain);
+    masterGain.connect(audioCtx.destination);
+    ready = true;
+  }
+
+  function ensureReady() {
+    if (!ready) build();
+    return ready;
+  }
+
+  // Cave effect ON (teredam + reverb goa)
+  function setCave() {
+    if (!ensureReady()) return;
+    const t  = audioCtx.currentTime;
+    lowpass.frequency.cancelScheduledValues(t);
+    dry.gain.cancelScheduledValues(t);
+    wet.gain.cancelScheduledValues(t);
+    lowpass.frequency.setTargetAtTime(600,  t, 0.12);
+    lowpass.Q.value = 2.0;
+    dry.gain.setTargetAtTime(0.35, t, 0.12);
+    wet.gain.setTargetAtTime(0.85, t, 0.12);
+  }
+
+  // Cave effect OFF (normal jernih)
+  function setNormal(durSec = 1.8) {
+    if (!ensureReady()) return;
+    const t  = audioCtx.currentTime;
+    const tc = durSec / 3;
+    lowpass.frequency.cancelScheduledValues(t);
+    dry.gain.cancelScheduledValues(t);
+    wet.gain.cancelScheduledValues(t);
+    lowpass.frequency.setTargetAtTime(18000, t, tc);
+    lowpass.Q.value = 1.0;
+    dry.gain.setTargetAtTime(1.0, t, tc);
+    wet.gain.setTargetAtTime(0.0, t, tc);
+  }
+
+  // Fade volume in/out over durSec
+  function fadeIn(durSec = 1.0, targetVol = 1.0) {
+    if (!ensureReady()) return;
+    const t = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(t);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, t);
+    masterGain.gain.linearRampToValueAtTime(targetVol, t + durSec);
+  }
+
+  function fadeOut(durSec = 1.0) {
+    if (!ensureReady()) return;
+    const t = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(t);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, t);
+    masterGain.gain.linearRampToValueAtTime(0, t + durSec);
+  }
+
+  function play() {
+    if (!ensureReady()) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    audioEl.currentTime = 0;
+    audioEl.play().catch(() => {});
+  }
+
+  function pause() {
+    audioEl.pause();
+  }
+
+  function setVolume(v) {
+    if (!ensureReady()) return;
+    masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    masterGain.gain.setValueAtTime(v, audioCtx.currentTime);
+  }
+
+  return { build, setCave, setNormal, fadeIn, fadeOut, play, pause, setVolume, get ready() { return ready; } };
+}
+
+// ── Dua audio element ──
+const lobbyMusicEl = new Audio('assets/audio/lobbyost.m4a');
+lobbyMusicEl.loop = true;
+lobbyMusicEl.crossOrigin = 'anonymous';
+
+const charMusicEl  = new Audio('assets/audio/charactersost.m4a');
+charMusicEl.loop  = true;
+charMusicEl.crossOrigin = 'anonymous';
+
+let lobbyTrack = null;
+let charTrack  = null;
+
+// Inisialisasi AudioContext + kedua track (dipanggil pada first interaction)
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+  lobbyTrack = createTrack(lobbyMusicEl);
+  charTrack  = createTrack(charMusicEl);
+  lobbyTrack.build();
+  charTrack.build();
+}
+
+// ── Transisi audio antar layar ──
+// fromTrack  fade out cave → pause
+// toTrack    cave on → play → fade in
+// durSec     durasi crossfade
+function crossfade(fromTrack, toTrack, durSec = 1.2) {
+  return new Promise(resolve => {
+    if (!audioCtx) { resolve(); return; }
+    // Apply cave ke kedua track sebelum crossfade
+    if (fromTrack) { fromTrack.setCave(); fromTrack.fadeOut(durSec); }
+    if (toTrack)   {
+      toTrack.setCave();
+      toTrack.setVolume(0);
+      toTrack.play();
+      toTrack.fadeIn(durSec);
+    }
+    setTimeout(() => {
+      if (fromTrack) fromTrack.pause();
+      resolve();
+    }, durSec * 1000 + 100);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// TRANSISI LAYAR — urutan per layar:
+//
+// [Loading screen] → Tap To Continue:
+//   1. slideEnter (splashloading muncul dari kiri)
+//      → SAAT slide masuk: lobby sudah cave, lanjut normal saat slide keluar
+//   2. Swap ke lobby di belakang slide
+//   3. slideExit (slide keluar ke kanan)
+//   4. Normalkan lobby audio
+//
+// [Lobby] → Quick Match:
+//   1. Cave lobbyost langsung
+//   2. slideEnter (splashloading dari kiri)
+//      → crossfade lobby→char SELAMA slide tampil
+//   3. Swap ke char screen
+//   4. slideExit (ke kanan)
+//   5. Normalkan charост
+//
+// [Char] → Back:
+//   1. Cave charост langsung
+//   2. slideEnter
+//      → crossfade char→lobby SELAMA slide tampil
+//   3. Swap ke lobby
+//   4. slideExit
+//   5. Normalkan lobbyost
+// ══════════════════════════════════════════════════════════════
 
 // ── Prepare & Show Menu ──
 function prepareMenu() {
@@ -1635,6 +1830,7 @@ function prepareMenu() {
   menuScreen.style.pointerEvents = 'none';
   menuScreen.classList.add('active');
 }
+
 function showMenu() {
   document.querySelectorAll('.screen:not(#screen-menu)').forEach(s => {
     s.classList.remove('active'); s.style.opacity = '0';
@@ -1643,7 +1839,6 @@ function showMenu() {
   menuScreen.classList.add('active');
   menuScreen.style.opacity = '1';
   menuScreen.style.pointerEvents = 'all';
-
   const account = getAccount();
   if (account) {
     const el = document.getElementById('bar-name');
@@ -1658,82 +1853,29 @@ function showMenu() {
     }
   }
   spawnParticles();
-  if (lobbyAudioReady) setNormalEffect(2.5);
 }
 
-// ── WEB AUDIO ──
-let audioCtx=null, sourceNode=null, gainNode=null, lowpassNode=null;
-let convolverNode=null, dryGain=null, wetGain=null, lobbyAudioReady=false;
-const lobbyMusic = new Audio('assets/audio/lobbyost.m4a');
-lobbyMusic.loop = true; lobbyMusic.crossOrigin = 'anonymous';
-
-function buildAudioGraph() {
-  if (audioCtx) return;
-  audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
-  sourceNode = audioCtx.createMediaElementSource(lobbyMusic);
-  gainNode   = audioCtx.createGain();
-  lowpassNode = audioCtx.createBiquadFilter();
-  lowpassNode.type = 'lowpass'; lowpassNode.frequency.value = 400; lowpassNode.Q.value = 1.2;
-  convolverNode = audioCtx.createConvolver();
-  buildCaveIR(audioCtx).then(ir => { convolverNode.buffer = ir; });
-  dryGain = audioCtx.createGain(); wetGain = audioCtx.createGain();
-  dryGain.gain.value = 0.4; wetGain.gain.value = 0.8;
-  sourceNode.connect(lowpassNode);
-  lowpassNode.connect(dryGain); lowpassNode.connect(convolverNode);
-  convolverNode.connect(wetGain);
-  dryGain.connect(gainNode); wetGain.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-  gainNode.gain.value = 1.0; lobbyAudioReady = true;
-}
-function buildCaveIR(ctx) {
-  return new Promise(resolve => {
-    const len = Math.floor(ctx.sampleRate * 3.5);
-    const ir  = ctx.createBuffer(2, len, ctx.sampleRate);
-    for (let ch=0;ch<2;ch++) { const d=ir.getChannelData(ch); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5); }
-    resolve(ir);
-  });
-}
-function setLoadingEffect() {
-  if (!lobbyAudioReady) return;
-  const t = audioCtx.currentTime;
-  lowpassNode.frequency.setTargetAtTime(600, t, 0.15); lowpassNode.Q.value = 2.0;
-  gainNode.gain.setTargetAtTime(1.0, t, 0.1);
-  dryGain.gain.setTargetAtTime(0.4, t, 0.15); wetGain.gain.setTargetAtTime(0.8, t, 0.15);
-}
-function setNormalEffect(dur=2.5) {
-  if (!lobbyAudioReady) return;
-  const t=audioCtx.currentTime, tc=dur/3;
-  lowpassNode.frequency.setTargetAtTime(18000, t, tc);
-  dryGain.gain.setTargetAtTime(1.0, t, tc); wetGain.gain.setTargetAtTime(0.0, t, tc);
-  gainNode.gain.setTargetAtTime(1.0, t, 0.1);
-}
-
-// ── MAIN SEQUENCE (no PIN — langsung splashscreen) ──
+// ── MAIN SEQUENCE ──
 async function runSequence() {
   await goFullscreenLandscape();
 
-  // 1. Splashscreen
   showScreen('screen-splash');
   await wait(3000);
 
-  // 2. Layar hitam
   showScreen('screen-black');
   await wait(2000);
 
-  // 3. Loading screen
   showScreen('screen-load');
 
-  // Musik
-  buildAudioGraph();
-  lobbyMusic.currentTime = 0;
-  lobbyMusic.play().then(() => {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    setLoadingEffect();
-  }).catch(() => {});
+  // Init audio sekarang (sudah ada gesture dari user)
+  initAudio();
+  // Lobby music: cave effect dulu (loading screen)
+  lobbyTrack.setCave();
+  lobbyTrack.setVolume(0);
+  lobbyTrack.play();
+  lobbyTrack.fadeIn(1.5);
 
   await wait(2000);
-
-  // Loading steps
   await showLoadingText('Connecting servers...', 3000);
   await showLoadingText('Loading assets...', 3000);
   await showLoadingText('Checking account...', 3000);
@@ -1742,8 +1884,7 @@ async function runSequence() {
 
   const account = getAccount();
   if (account) {
-    const name = account.firstname + (account.lastname ? ' ' + account.lastname : '');
-    showNotif(account.avatarUrl || '', name);
+    showNotif(account.avatarUrl || '', account.firstname + (account.lastname ? ' ' + account.lastname : ''));
     showTab('Tap To Continue');
   } else {
     showTab('Create Account');
@@ -1755,8 +1896,15 @@ bottomTab.addEventListener('click', async () => {
   if (bottomTab.textContent === 'Tap To Continue') {
     hideTab();
     prepareMenu();
-    await slideShow(() => { showMenu(); }, 10000);
-    await slideOut();
+    // Slide masuk dari kiri
+    await slideEnter();
+    // Swap screen di balik slide
+    showMenu();
+    // Slide keluar ke kanan
+    await slideExit();
+    // Normalkan lobby setelah slide keluar
+    lobbyTrack.setNormal(2.0);
+
   } else if (bottomTab.textContent === 'Create Account') {
     openModal();
   }
@@ -1764,6 +1912,93 @@ bottomTab.addEventListener('click', async () => {
 bottomTab.addEventListener('touchstart', e => { e.preventDefault(); bottomTab.click(); }, { passive: false });
 
 window.addEventListener('load', runSequence);
+
+// ── OPEN CHARACTER SCREEN ──
+let charTransitionBusy = false;
+async function openCharacterScreen() {
+  if (charTransitionBusy) return;
+  charTransitionBusy = true;
+
+  initAudio(); // pastikan audio siap
+
+  // Step 1: Langsung terapkan cave ke lobby (sebelum slide muncul)
+  lobbyTrack.setCave();
+
+  // Step 2: Slide masuk dari kiri
+  await slideEnter();
+
+  // Step 3: Crossfade lobby → char DI BALIK slide (cave keduanya)
+  await crossfade(lobbyTrack, charTrack, 1.0);
+
+  // Step 4: Swap screen di balik slide
+  document.getElementById('screen-char').classList.add('active');
+  document.getElementById('screen-menu').classList.remove('active');
+  document.getElementById('screen-menu').style.opacity = '0';
+  document.getElementById('screen-menu').style.pointerEvents = 'none';
+
+  // Step 5: Slide keluar ke kanan
+  await slideExit();
+
+  // Step 6: Normalkan char audio setelah slide keluar
+  charTrack.setNormal(1.8);
+
+  // Step 7: Reset & mulai timer
+  const timerEl = document.getElementById('char-timer-val');
+  timerEl.classList.remove('urgent');
+  timerEl.textContent = '38';
+  startCharTimer(38);
+
+  charTransitionBusy = false;
+}
+
+// ── BACK FROM CHARACTER SCREEN ──
+async function charBack() {
+  if (charTransitionBusy) return;
+  charTransitionBusy = true;
+  clearInterval(charTimerInterval);
+
+  initAudio();
+
+  // Step 1: Cave char sebelum slide muncul
+  charTrack.setCave();
+
+  // Step 2: Slide masuk dari kiri
+  await slideEnter();
+
+  // Step 3: Crossfade char → lobby di balik slide
+  await crossfade(charTrack, lobbyTrack, 1.0);
+
+  // Step 4: Swap screen
+  const menuScr = document.getElementById('screen-menu');
+  menuScr.classList.add('active');
+  menuScr.style.opacity = '1';
+  menuScr.style.pointerEvents = '';
+  document.getElementById('screen-char').classList.remove('active');
+
+  // Step 5: Slide keluar ke kanan
+  await slideExit();
+
+  // Step 6: Normalkan lobby
+  lobbyTrack.setNormal(2.0);
+
+  charTransitionBusy = false;
+}
+
+// ── TIMER ──
+let charTimerInterval = null;
+function startCharTimer(seconds) {
+  clearInterval(charTimerInterval);
+  const el = document.getElementById('char-timer-val');
+  let t = seconds;
+  el.textContent = t;
+  charTimerInterval = setInterval(() => {
+    t--;
+    el.textContent = t;
+    if (t <= 10) el.classList.add('urgent');
+    else el.classList.remove('urgent');
+    if (t <= 0) clearInterval(charTimerInterval);
+  }, 1000);
+}
 
 // ── Avatar upload ──
 let avatarDataUrl = null;
@@ -1820,7 +2055,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   closeModal();
   hideTab();
   const name = fn + (ln ? ' ' + ln : '');
-  await showLoadingText('Setting up account...', 3000);
+  await showLoadingText('Setting up account...', 2000);
   showNotif(account.avatarUrl || '', name);
   showTab('Tap To Continue');
 });
@@ -1925,208 +2160,6 @@ function spawnParticles() {
     p.style.cssText = `width:${size}px;height:${size}px;background:${color};left:${left}%;animation-duration:${dur}s;animation-delay:${delay}s;border-radius:${Math.random()>0.5?'50%':'2px'};`;
     container.appendChild(p);
   }
-}
-
-// ── CHAR AUDIO GRAPH ──
-let charAudioCtx = null;          // share audioCtx
-let charSourceNode = null;
-let charGainNode = null;
-let charLowpassNode = null;
-let charConvolverNode = null;
-let charDryGain = null;
-let charWetGain = null;
-let charAudioReady = false;
-
-const charMusic = new Audio('assets/audio/charactersost.m4a');
-charMusic.loop = true;
-charMusic.crossOrigin = 'anonymous';
-
-function buildCharAudioGraph() {
-  if (charAudioReady) return;
-  // Gunakan audioCtx yang sama (sudah dibuat saat lobby)
-  if (!audioCtx) return;
-  charSourceNode  = audioCtx.createMediaElementSource(charMusic);
-  charGainNode    = audioCtx.createGain();
-  charLowpassNode = audioCtx.createBiquadFilter();
-  charLowpassNode.type = 'lowpass';
-  charLowpassNode.frequency.value = 400;
-  charLowpassNode.Q.value = 1.2;
-  charConvolverNode = audioCtx.createConvolver();
-  buildCaveIR(audioCtx).then(ir => { charConvolverNode.buffer = ir; });
-  charDryGain = audioCtx.createGain();
-  charWetGain = audioCtx.createGain();
-  charDryGain.gain.value = 0.4;
-  charWetGain.gain.value = 0.8;
-  charSourceNode.connect(charLowpassNode);
-  charLowpassNode.connect(charDryGain);
-  charLowpassNode.connect(charConvolverNode);
-  charConvolverNode.connect(charWetGain);
-  charDryGain.connect(charGainNode);
-  charWetGain.connect(charGainNode);
-  charGainNode.connect(audioCtx.destination);
-  charGainNode.gain.value = 0; // mulai silent
-  charAudioReady = true;
-}
-
-function setCharLoadingEffect() {
-  if (!charAudioReady) return;
-  const t = audioCtx.currentTime;
-  charLowpassNode.frequency.setTargetAtTime(600, t, 0.15);
-  charLowpassNode.Q.value = 2.0;
-  charDryGain.gain.setTargetAtTime(0.4, t, 0.15);
-  charWetGain.gain.setTargetAtTime(0.8, t, 0.15);
-}
-
-function setCharNormalEffect(dur = 1.5) {
-  if (!charAudioReady) return;
-  const t = audioCtx.currentTime, tc = dur / 3;
-  charLowpassNode.frequency.setTargetAtTime(18000, t, tc);
-  charDryGain.gain.setTargetAtTime(1.0, t, tc);
-  charWetGain.gain.setTargetAtTime(0.0, t, tc);
-  charGainNode.gain.setTargetAtTime(1.0, t, 0.1);
-}
-
-// Crossfade lobby → char (keduanya cave effect dulu)
-function crossfadeToChar(durationSec = 1.5) {
-  return new Promise(resolve => {
-    if (!charAudioReady) { resolve(); return; }
-    const steps = 40;
-    const interval = (durationSec * 1000) / steps;
-    let step = 0;
-    // Set cave effect pada char audio sebelum mulai
-    setCharLoadingEffect();
-    charGainNode.gain.value = 0;
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    charMusic.currentTime = 0;
-    charMusic.play().catch(() => {});
-    const fade = setInterval(() => {
-      step++;
-      const t = step / steps;
-      if (gainNode)     gainNode.gain.value     = Math.max(0, 1 - t);
-      if (charGainNode) charGainNode.gain.value  = Math.min(1, t);
-      if (step >= steps) {
-        clearInterval(fade);
-        lobbyMusic.pause();
-        if (gainNode) gainNode.gain.value = 1;
-        resolve();
-      }
-    }, interval);
-  });
-}
-
-// Crossfade char → lobby
-function crossfadeToLobby(durationSec = 1.5) {
-  return new Promise(resolve => {
-    if (!lobbyAudioReady) { resolve(); return; }
-    const now = audioCtx.currentTime;
-    // Cave effect ke lobby
-    lowpassNode.frequency.cancelScheduledValues(now);
-    dryGain.gain.cancelScheduledValues(now);
-    wetGain.gain.cancelScheduledValues(now);
-    gainNode.gain.cancelScheduledValues(now);
-    lowpassNode.frequency.setValueAtTime(600, now);
-    lowpassNode.Q.value = 2.0;
-    dryGain.gain.setValueAtTime(0.4, now);
-    wetGain.gain.setValueAtTime(0.8, now);
-    gainNode.gain.setValueAtTime(0, now);
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    lobbyMusic.play().catch(() => {});
-    const steps = 40;
-    const interval = (durationSec * 1000) / steps;
-    let step = 0;
-    const fade = setInterval(() => {
-      step++;
-      const t = step / steps;
-      if (charGainNode) charGainNode.gain.value = Math.max(0, 1 - t);
-      gainNode.gain.value = Math.min(1, t);
-      if (step >= steps) {
-        clearInterval(fade);
-        charMusic.pause();
-        if (charGainNode) charGainNode.gain.value = 0;
-        resolve();
-      }
-    }, interval);
-  });
-}
-
-// ── OPEN CHARACTER SCREEN (dari Quick Match) ──
-async function openCharacterScreen() {
-  // Siapkan char audio graph
-  buildCharAudioGraph();
-
-  // slideShow: splashloading tampil
-  // Di detik ke-7 crossfade lobby → char (keduanya cave)
-  await slideShow(() => {
-    crossfadeToChar(1.5);
-  }, 10000);
-
-  // Swap screen di balik slide
-  document.getElementById('screen-char').classList.add('active');
-  document.getElementById('screen-menu').classList.remove('active');
-  document.getElementById('screen-menu').style.opacity = '0';
-  document.getElementById('screen-menu').style.pointerEvents = 'none';
-
-  // 2 detik sebelum slide out → sudah mulai di slideShow(10000)
-  // slide out sekarang (mask collapse)
-  await slideOut();
-
-  // Setelah slide keluar → normalin char audio
-  if (charAudioReady) setCharNormalEffect(1.5);
-
-  // Reset & mulai timer
-  const timerEl = document.getElementById('char-timer-val');
-  timerEl.classList.remove('urgent');
-  timerEl.textContent = '38';
-  startCharTimer(38);
-}
-
-// ── BACK FROM CHARACTER SCREEN ──
-async function charBack() {
-  clearInterval(charTimerInterval);
-
-  // slideShow: di detik ke-7 crossfade char → lobby (cave effect)
-  await slideShow(() => {
-    crossfadeToLobby(1.5);
-  }, 10000);
-
-  // Swap screen
-  const menuScr = document.getElementById('screen-menu');
-  menuScr.classList.add('active');
-  menuScr.style.opacity = '1';
-  menuScr.style.pointerEvents = '';
-  document.getElementById('screen-char').classList.remove('active');
-
-  await slideOut();
-
-  // Normalin lobby audio setelah slide keluar
-  if (lobbyAudioReady) setNormalEffect(2.0);
-
-  // Reset char audio graph
-  if (charAudioReady) {
-    const now = audioCtx.currentTime;
-    charLowpassNode.frequency.cancelScheduledValues(now);
-    charLowpassNode.frequency.setValueAtTime(18000, now);
-    charDryGain.gain.cancelScheduledValues(now);
-    charDryGain.gain.setValueAtTime(1.0, now);
-    charWetGain.gain.cancelScheduledValues(now);
-    charWetGain.gain.setValueAtTime(0.0, now);
-  }
-}
-
-// ── TIMER ──
-let charTimerInterval = null;
-function startCharTimer(seconds) {
-  clearInterval(charTimerInterval);
-  const el = document.getElementById('char-timer-val');
-  let t = seconds;
-  el.textContent = t;
-  charTimerInterval = setInterval(() => {
-    t--;
-    el.textContent = t;
-    if (t <= 10) el.classList.add('urgent');
-    else el.classList.remove('urgent');
-    if (t <= 0) clearInterval(charTimerInterval);
-  }, 1000);
 }
 
 // ── CHAR SLOT SELECTION ──
